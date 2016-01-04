@@ -1,0 +1,15 @@
+Module abtest
+Init init_function
+
+Function VOID set_rule(PRIV_VCL, STRING, STRING)
+Function VOID rem_rule(PRIV_VCL, STRING)
+Function VOID clear(PRIV_VCL)
+
+Function INT load_config(PRIV_VCL, STRING)
+Function INT save_config(PRIV_VCL, STRING)
+
+Function STRING get_rand(PRIV_VCL, STRING)
+Function STRING get_rules(PRIV_VCL)
+
+Function DURATION get_duration(PRIV_VCL, STRING)
+Function STRING get_expire(PRIV_VCL, STRING)
