@@ -7,10 +7,7 @@
 #include <stdbool.h>
 
 #include "vrt.h"
-#include "bin/varnishd/cache.h"
-
-#include "vcc_if.h"
-
+#include "cache/cache.h"
 #include "vmod_abtest.h"
 
 #define ALLOC_CFG(cfg)                                                          \
@@ -28,9 +25,9 @@
         (field) = NULL;                                                         \
     }
 
-#define LOG_ERR(sess, ...)                                                      \
-    if ((sess) != NULL) {                                                       \
-        WSP((sess), SLT_VCL_error, __VA_ARGS__);                                \
+#define LOG_ERR(vrt_ctx, ...)                                                      \
+    if ((vrt_ctx) != NULL) {                                                       \
+        VSLb((vrt_ctx->vsl), SLT_VCL_Error, __VA_ARGS__);                                \
     } else {                                                                    \
         fprintf(stderr, __VA_ARGS__);                                           \
         fputs("\n", stderr);                                                    \
@@ -138,7 +135,7 @@ static struct rule* get_text_rule(struct vmod_abtest *cfg, const char *key) {
 }
 
 
-static void alloc_key_regex(struct sess *sp, struct vmod_abtest *cfg, struct rule* rule, const char *key) {
+static void alloc_key_regex(struct vrt_ctx *sp, struct vmod_abtest *cfg, struct rule* rule, const char *key) {
     if (cfg->use_text_key) {
         rule->key_regex = NULL;
         return;
@@ -147,7 +144,7 @@ static void alloc_key_regex(struct sess *sp, struct vmod_abtest *cfg, struct rul
     rule->key_regex = calloc(1, sizeof(regex_t));
 
     int r;
-    if (r = regcomp(rule->key_regex, key, REG_EXTENDED | REG_NOSUB)) {
+    if ((r = regcomp(rule->key_regex, key, REG_EXTENDED | REG_NOSUB))) {
         size_t err_len = regerror(r, rule->key_regex, NULL, 0);
         char* err_buf = alloca(err_len);
         regerror(r, rule->key_regex, err_buf, err_len);
@@ -158,9 +155,8 @@ static void alloc_key_regex(struct sess *sp, struct vmod_abtest *cfg, struct rul
     }
 }
 
-static struct rule* alloc_rule(struct sess *sp, struct vmod_abtest *cfg, const char *key) {
+static struct rule* alloc_rule(struct vrt_ctx *sp, struct vmod_abtest *cfg, const char *key) {
     unsigned l;
-    char *p;
     struct rule *rule;
 
     rule = (struct rule*)calloc(sizeof(struct rule), 1);
@@ -178,7 +174,7 @@ static struct rule* alloc_rule(struct sess *sp, struct vmod_abtest *cfg, const c
     return rule;
 }
 
-static void parse_rule(struct sess *sp, struct rule *rule, const char *source) {
+static void parse_rule(struct vrt_ctx *sp, struct rule *rule, const char *source) {
     unsigned n;
     unsigned sum;
     int r;
@@ -187,7 +183,7 @@ static void parse_rule(struct sess *sp, struct rule *rule, const char *source) {
     regex_t time_regex;
     regmatch_t match[3];
 
-    if (r = regcomp(&rule_regex, RULE_REGEX, REG_EXTENDED)){
+    if ((r = regcomp(&rule_regex, RULE_REGEX, REG_EXTENDED))){
         size_t err_len = regerror(r, &rule_regex, NULL, 0);
         char* err_buf = alloca(err_len);
         regerror(r, &rule_regex, err_buf, err_len);
@@ -196,7 +192,7 @@ static void parse_rule(struct sess *sp, struct rule *rule, const char *source) {
         return;
     }
 
-    if (r = regcomp(&time_regex, TIME_REGEX, REG_EXTENDED)){
+    if ((r = regcomp(&time_regex, TIME_REGEX, REG_EXTENDED))){
         regfree(&rule_regex);
         size_t err_len = regerror(r, &time_regex, NULL, 0);
         char* err_buf = alloca(err_len);
@@ -207,7 +203,7 @@ static void parse_rule(struct sess *sp, struct rule *rule, const char *source) {
     }
 
     s = source;
-    if (r = regexec(&time_regex, s, 2, match, 0) == 0) {
+    if ((r = regexec(&time_regex, s, 2, match, 0) == 0)) {
         rule->duration = strtod(s + match[1].rm_so, NULL);
     } else {
         rule->duration = 0.;
@@ -274,7 +270,7 @@ int init_function(struct vmod_priv *priv, const struct VCL_conf *conf) {
     return (0);
 }
 
-void __match_proto__() vmod_set_rule(struct sess *sp, struct vmod_priv *priv, const char *key, const char *rule) {
+void __match_proto__() vmod_set_rule(struct vrt_ctx *sp, struct vmod_priv *priv, const char *key, const char *rule) {
     AN(key);
     AN(rule);
 
@@ -293,7 +289,7 @@ void __match_proto__() vmod_set_rule(struct sess *sp, struct vmod_priv *priv, co
     AZ(pthread_rwlock_unlock(&cfg_rwl));
 }
 
-void __match_proto__() vmod_rem_rule(struct sess *sp, struct vmod_priv *priv, const char *key) {
+void __match_proto__() vmod_rem_rule(struct vrt_ctx *sp, struct vmod_priv *priv, const char *key) {
     AN(key);
 
     if (priv->priv == NULL) {
@@ -311,7 +307,7 @@ void __match_proto__() vmod_rem_rule(struct sess *sp, struct vmod_priv *priv, co
     AZ(pthread_rwlock_unlock(&cfg_rwl));
 }
 
-void __match_proto__() vmod_clear(struct sess *sp, struct vmod_priv *priv) {
+void __match_proto__() vmod_clear(struct vrt_ctx *sp, struct vmod_priv *priv) {
     if (priv->priv == NULL) {
         return;
     }
@@ -321,7 +317,7 @@ void __match_proto__() vmod_clear(struct sess *sp, struct vmod_priv *priv) {
     AZ(pthread_rwlock_unlock(&cfg_rwl));
 }
 
-int __match_proto__() vmod_load_config(struct sess *sp, struct vmod_priv *priv, const char *source) {
+int __match_proto__() vmod_load_config(struct vrt_ctx *sp, struct vmod_priv *priv, const char *source) {
     AN(source);
 
     AZ(pthread_mutex_lock(&cfg_mtx));
@@ -339,7 +335,7 @@ int __match_proto__() vmod_load_config(struct sess *sp, struct vmod_priv *priv, 
 
     ALLOC_CFG(cfg);
 
-    if (r = regcomp(&regex, CONF_REGEX, REG_EXTENDED)){
+    if ((r = regcomp(&regex, CONF_REGEX, REG_EXTENDED))){
         cfg_free(cfg);
         AZ(pthread_rwlock_unlock(&cfg_rwl));
         AZ(pthread_mutex_unlock(&cfg_mtx));
@@ -415,7 +411,7 @@ int __match_proto__() vmod_load_config(struct sess *sp, struct vmod_priv *priv, 
     return 0;
 }
 
-int __match_proto__() vmod_save_config(struct sess *sp, struct vmod_priv *priv, const char *target) {
+int __match_proto__() vmod_save_config(struct vrt_ctx *sp, struct vmod_priv *priv, const char *target) {
     AN(target);
 
     if (priv->priv == NULL) {
@@ -459,7 +455,7 @@ int __match_proto__() vmod_save_config(struct sess *sp, struct vmod_priv *priv, 
 * Weighted random algorithm from:
 * http://erlycoder.com/105/javascript-weighted-random-value-from-array
 */
-const char* __match_proto__() vmod_get_rand(struct sess *sp, struct vmod_priv *priv, const char *key) {
+const char* __match_proto__() vmod_get_rand(struct vrt_ctx *sp, struct vmod_priv *priv, const char *key) {
     AN(key);
 
     struct rule *rule;
@@ -504,7 +500,7 @@ const char* __match_proto__() vmod_get_rand(struct sess *sp, struct vmod_priv *p
     return rule->options[p];
 }
 
-const char* __match_proto__() vmod_get_rules(struct sess *sp, struct vmod_priv *priv) {
+const char* __match_proto__() vmod_get_rules(struct vrt_ctx *sp, struct vmod_priv *priv) {
     if (priv->priv == NULL) {
         return NULL;
     }
@@ -557,7 +553,7 @@ const char* __match_proto__() vmod_get_rules(struct sess *sp, struct vmod_priv *
     return rules;
 }
 
-double __match_proto__() vmod_get_duration(struct sess *sp, struct vmod_priv *priv, const char *key) {
+double __match_proto__() vmod_get_duration(struct vrt_ctx *sp, struct vmod_priv *priv, const char *key) {
     AN(key);
 
     struct rule *rule;
@@ -577,7 +573,7 @@ double __match_proto__() vmod_get_duration(struct sess *sp, struct vmod_priv *pr
     return rule->duration;
 }
 
-const char*  __match_proto__() vmod_get_expire(struct sess *sp, struct vmod_priv *priv, const char *key) {
+const char*  __match_proto__() vmod_get_expire(struct vrt_ctx *sp, struct vmod_priv *priv, const char *key) {
     AN(key);
 
     struct rule *rule;
@@ -596,7 +592,7 @@ const char*  __match_proto__() vmod_get_expire(struct sess *sp, struct vmod_priv
     }
 
     duration = rule->duration;
-    char* expire = VRT_time_string(sp, TIM_real() + duration);
+    char* expire = VRT_TIME_string(sp, TIM_real() + duration);
 
     AZ(pthread_rwlock_unlock(&cfg_rwl));
     return expire;
